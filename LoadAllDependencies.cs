@@ -14,6 +14,7 @@ using System.IO;
 using ComServiceProvider = Microsoft.VisualStudio.OLE.Interop.IServiceProvider;
 using Task = System.Threading.Tasks.Task;
 using IAsyncServiceProvider = Microsoft.VisualStudio.Shell.IAsyncServiceProvider;
+using System.Runtime.InteropServices;
 
 namespace LoadDependencies
 {
@@ -58,12 +59,10 @@ namespace LoadDependencies
         /// </summary>
         public static LoadAllDependencies Instance { get; private set; }
 
-        /// <summary>
-        /// Gets the service provider from the owner package.
-        /// </summary>
-        // private IAsyncServiceProvider ServiceProvider => this.package;
+        private DTE2 DTE => Package.GetGlobalService( typeof( DTE ) ) as DTE2;
 
-        private DTE2 GetDTE2() => Package.GetGlobalService( typeof( DTE ) ) as DTE2;
+        private SVsShellMonitorSelection MonitorSelection => 
+            Package.GetGlobalService( typeof( SVsShellMonitorSelection ) ) as SVsShellMonitorSelection;
 
         private SVsSolution Solution
         {
@@ -71,7 +70,7 @@ namespace LoadDependencies
             {
                 ThreadHelper.ThrowIfNotOnUIThread();
                 return (SVsSolution)
-                    new ServiceProvider( this.GetDTE2() as ComServiceProvider ).GetService( typeof( SVsSolution ) );
+                    new ServiceProvider( this.DTE as ComServiceProvider ).GetService( typeof( SVsSolution ) );
             }
         }
 
@@ -97,34 +96,63 @@ namespace LoadDependencies
         private void Execute( object sender, EventArgs e )
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var selectedProjectPath = this.GetSourceFilePath();
-            var dependentProjectPaths = this.GetReferencedProjects( selectedProjectPath );
-            var dependentProjectGuids = dependentProjectPaths.Select( p => this.GetProjectGuid( p ) ).ToArray();
-            var solution = (IVsSolution4)this.Solution;
-            for(var i = 0; i < dependentProjectGuids.Length; ++i)
+
+            var (projectId, projectName) = this.GetSelectedProject();
+            if (projectId == Guid.Empty)
             {
-                ErrorHandler.ThrowOnFailure(solution.ReloadProject(ref dependentProjectGuids[i]));
+                return;
+            }
+
+            var dependentProjectPaths = this.GetReferencedProjects( projectName );
+            var dependentProjectGuids = dependentProjectPaths.Select( p => this.GetProjectGuid( p ) )
+                                                             .Where( g => g != Guid.Empty )
+                                                             .ToArray();
+            var solution = (IVsSolution4)this.Solution;
+            Assumes.Present( solution );
+
+            // "If the project was not previously unloaded, then this method does nothing and returns S_FALSE." - MSDN
+            _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref projectId ) );
+            for (var i = 0; i < dependentProjectGuids.Length; ++i)
+            {
+                _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref dependentProjectGuids[i] ) );
             }
         }
 
-        private string GetSourceFilePath()
+        private (Guid, string) GetSelectedProject()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            var selectedItems = (Array)this.GetDTE2().ToolWindows.SolutionExplorer.SelectedItems;
-            if (selectedItems == null)
-            {
-                return String.Empty;
-            }
 
-            foreach (UIHierarchyItem selItem in selectedItems)
+            var monitorSelection = (IVsMonitorSelection) this.MonitorSelection;
+            Assumes.Present( monitorSelection );
+            
+            _ = monitorSelection.GetCurrentSelection(
+                out var hierarchyPtr, out var projectItemId, out var multiItemSelectPtr, out var selectionContainerPtr );
+            try
             {
-                if (selItem.Object is Project project)
+                if (Marshal.GetTypedObjectForIUnknown( hierarchyPtr, typeof( IVsHierarchy ) ) is IVsHierarchy hierarchy)
                 {
-                    return project.FileName;
+                    var solution = (IVsSolution)this.Solution;
+                    Assumes.Present( solution );
+
+                    _ = ErrorHandler.ThrowOnFailure( solution.GetSolutionInfo( out var directory, out _, out _ ) );
+                    _ = ErrorHandler.ThrowOnFailure( solution.GetGuidOfProject( hierarchy, out var projectGuid ) );
+                    _ = ErrorHandler.ThrowOnFailure( solution.GetUniqueNameOfProject( hierarchy, out var uniqueName ) );
+                    var projectPath = Path.GetFullPath( Path.Combine( directory, uniqueName ) );
+
+                    return ( projectGuid, projectPath );
+                }
+            }
+            finally
+            {
+                _ = Marshal.Release( hierarchyPtr );
+                _ = Marshal.Release( selectionContainerPtr );
+                if (multiItemSelectPtr != null)
+                {
+                    _ = Marshal.ReleaseComObject( multiItemSelectPtr );
                 }
             }
 
-            return String.Empty;
+            return ( Guid.Empty, String.Empty );
         }
 
         IEnumerable<string> GetReferencedProjects( string projectPath, HashSet<string> accumulator = null )
@@ -153,12 +181,13 @@ namespace LoadDependencies
 
             var solution = (IVsSolution)this.Solution;
             Assumes.Present( solution );
-            _ = solution.GetProjectOfUniqueName( projectPath, out var hierarchy );
+
+            _ = ErrorHandler.ThrowOnFailure( solution.GetProjectOfUniqueName( projectPath, out var hierarchy ) );
             if (hierarchy != null)
             {
-                ErrorHandler.ThrowOnFailure(
-                  hierarchy.GetGuidProperty(
-                      VSConstants.VSITEMID_ROOT, (int)__VSHPROPID.VSHPROPID_ProjectIDGuid, out var projectGuid ) );
+                _ = ErrorHandler.ThrowOnFailure(
+                    hierarchy.GetGuidProperty(
+                        VSConstants.VSITEMID_ROOT, (int)__VSHPROPID.VSHPROPID_ProjectIDGuid, out var projectGuid ) );
 
                 if (projectGuid != null)
                 {

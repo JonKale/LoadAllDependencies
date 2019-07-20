@@ -31,16 +31,6 @@
     group; your package should define its own command set in order to avoid collisions
     with command ids defined by other packages. -->
 
-    <!-- In this section you can define new menu groups. A menu group is a container for
-         other menus or buttons (commands); from a visual point of view you can see the
-         group as the part of a menu contained between two lines. The parent of a group
-         must be a menu. -->
-    <!--<Groups>
-      <Group guid="guidLoadAllDependenciesPackageCmdSet" id="MyMenuGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_SOLNEXPL_ALL"/>
-      </Group>
-    </Groups>-->
-
     <!--Buttons section. -->
     <!--This section defines the elements the user can interact with, like a menu command or a button
         or combo box in a toolbar. -->
@@ -54,12 +44,14 @@
           If you do not want an image next to your command, remove the Icon node /> -->
       <Button guid="guidLoadAllDependenciesPackageCmdSet" id="LoadAllDependenciesId" priority="0x0102" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_CTXT_PROJECT_UNLOADRELOAD" />
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
+          <CommandName>cmdLoadAllDependencies</CommandName>
           <ButtonText>Load All Project Dependencies</ButtonText>
         </Strings>
       </Button>
     </Buttons>
-
   </Commands>
 
   <Symbols>
@@ -70,14 +62,10 @@
     <GuidSymbol name="guidLoadAllDependenciesPackageCmdSet" value="{a24ce2d6-6871-4350-9936-0fb86e1ffa7d}">
       <IDSymbol name="LoadAllDependenciesId" value="0x0100" />
     </GuidSymbol>
-
-    <!--<GuidSymbol name="guidImages" value="{46025579-ba46-4be5-917b-6cfd94369ad5}" >
-      <IDSymbol name="bmpPic1" value="1" />
-      <IDSymbol name="bmpPic2" value="2" />
-      <IDSymbol name="bmpPicSearch" value="3" />
-      <IDSymbol name="bmpPicX" value="4" />
-      <IDSymbol name="bmpPicArrows" value="5" />
-      <IDSymbol name="bmpPicStrikethrough" value="6" />
-    </GuidSymbol>-->
   </Symbols>
+
+  <VisibilityConstraints>
+    <VisibilityItem guid="guidLoadAllDependenciesPackageCmdSet"
+                    id="LoadAllDependenciesId" context="UICONTEXT_SolutionExists" />
+  </VisibilityConstraints>
 </CommandTable>
