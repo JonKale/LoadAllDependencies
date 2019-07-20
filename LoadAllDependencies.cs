@@ -34,6 +34,12 @@ namespace LoadDependencies
         public static readonly Guid CommandSet = new Guid( "a24ce2d6-6871-4350-9936-0fb86e1ffa7d" );
 
         /// <summary>
+        /// Output window pane title and ID
+        /// </summary>
+        const string dependencyLoadFailuresPaneTitle = "Project Dependency Load Failures";
+        public static readonly Guid dependencyLoadFailuresPaneId = new Guid( "ef47923b-e63a-4a95-a12c-d90e0126e5a3" );
+
+        /// <summary>
         /// VS Package that provides this command, not null.
         /// </summary>
         private readonly AsyncPackage package;
@@ -59,20 +65,11 @@ namespace LoadDependencies
         /// </summary>
         public static LoadAllDependencies Instance { get; private set; }
 
-        private DTE2 DTE => Package.GetGlobalService( typeof( DTE ) ) as DTE2;
-
         private SVsShellMonitorSelection MonitorSelection => 
             Package.GetGlobalService( typeof( SVsShellMonitorSelection ) ) as SVsShellMonitorSelection;
 
-        private SVsSolution Solution
-        {
-            get
-            {
-                ThreadHelper.ThrowIfNotOnUIThread();
-                return (SVsSolution)
-                    new ServiceProvider( this.DTE as ComServiceProvider ).GetService( typeof( SVsSolution ) );
-            }
-        }
+        private SVsSolution Solution =>
+            Package.GetGlobalService( typeof( SVsSolution ) ) as SVsSolution;
 
         /// <summary>
         /// Initializes the singleton instance of the command.
@@ -104,17 +101,88 @@ namespace LoadDependencies
             }
 
             var dependentProjectPaths = this.GetReferencedProjects( projectName );
-            var dependentProjectGuids = dependentProjectPaths.Select( p => this.GetProjectGuid( p ) )
-                                                             .Where( g => g != Guid.Empty )
-                                                             .ToArray();
+            var dependentProjects = dependentProjectPaths.Select( p => new { path = p, guid = this.GetProjectGuid( p ) } )
+                                                         .Where( p => p.guid != Guid.Empty );
+
             var solution = (IVsSolution4)this.Solution;
             Assumes.Present( solution );
 
+            var errorMessage = String.Empty;
+            var errors = new[] { new { projectName, errorMessage } }.ToList();
+
             // "If the project was not previously unloaded, then this method does nothing and returns S_FALSE." - MSDN
-            _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref projectId ) );
-            for (var i = 0; i < dependentProjectGuids.Length; ++i)
+            // I'd love to know a better way of determining whether a project is loaded or not
+            try
             {
-                _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref dependentProjectGuids[i] ) );
+                _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref projectId ) );
+            }
+            catch( Exception ex )
+            {
+                var message = ex.Message;
+                while (ex.InnerException != null)
+                {
+                    ex = ex.InnerException;
+                    message += $"\r\n{ex.Message}";
+                }
+
+                errors.Add( new { projectName, errorMessage = message } );
+            }
+
+            foreach ( var project in dependentProjects )
+            {
+                var guid = project.guid;
+                try
+                {
+                    _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref guid ) );
+                }
+                catch (Exception ex)
+                {
+                    var message = ex.Message;
+                    while (ex.InnerException != null)
+                    {
+                        ex = ex.InnerException;
+                        message += $"\r\n{ex.Message}";
+                    }
+
+                    errors.Add( new { projectName = project.path, errorMessage = message } );
+                }
+            }
+
+            if ( errors.Count > 1 )
+            {
+                var outputWindow = Package.GetGlobalService( typeof( SVsOutputWindow ) ) as IVsOutputWindow;
+                Assumes.Present( solution );
+
+                var guid = dependencyLoadFailuresPaneId;
+                _ = ErrorHandler.ThrowOnFailure( 
+                    outputWindow.CreatePane( ref guid, dependencyLoadFailuresPaneTitle, 1, 1 ) );
+                _ = ErrorHandler.ThrowOnFailure( 
+                    outputWindow.GetPane( ref guid, out var dependencyLoadFailurePane ) );
+
+                try
+                {
+                    foreach (var error in errors.Skip( 1 ))
+                    {
+                        _ = ErrorHandler.ThrowOnFailure(
+                            dependencyLoadFailurePane.OutputString(
+                                $"Failed to load {error.projectName}\r\n{error.errorMessage}\r\n" ) );
+
+                    }
+
+                    _ = ErrorHandler.ThrowOnFailure( dependencyLoadFailurePane.Activate() );
+                }
+                finally
+                {
+                    _ = Marshal.ReleaseComObject( dependencyLoadFailurePane );
+                }
+
+                _ = VsShellUtilities.ShowMessageBox(
+                    this.package,
+                    "One or more of this projects dependencies failed to load. See the Output window for details",
+                    "Error loading project or dependencies",
+                    OLEMSGICON.OLEMSGICON_CRITICAL,
+                    OLEMSGBUTTON.OLEMSGBUTTON_OK,
+                    OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST );
             }
         }
 
@@ -124,9 +192,10 @@ namespace LoadDependencies
 
             var monitorSelection = (IVsMonitorSelection) this.MonitorSelection;
             Assumes.Present( monitorSelection );
-            
-            _ = monitorSelection.GetCurrentSelection(
-                out var hierarchyPtr, out var projectItemId, out var multiItemSelectPtr, out var selectionContainerPtr );
+
+            _ = ErrorHandler.ThrowOnFailure(
+                monitorSelection.GetCurrentSelection(
+                    out var hierarchyPtr, out var projectItemId, out var multiItemSelectPtr, out var selectionContainerPtr ) );
             try
             {
                 if (Marshal.GetTypedObjectForIUnknown( hierarchyPtr, typeof( IVsHierarchy ) ) is IVsHierarchy hierarchy)
