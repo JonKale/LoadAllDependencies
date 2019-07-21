@@ -34,3 +34,5 @@ If one or more project loads fail, the errors are written to the Output window.
 > initial release
 ### 1.0.1 - 21st July 2019
 > mandatory dumb bug fixed
+### 1.0.2 - 21st July 2019
+> worked out hot to do menu item ordering correctly
