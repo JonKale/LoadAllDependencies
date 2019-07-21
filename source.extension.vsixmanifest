@@ -1,9 +1,10 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
     <Metadata>
-        <Identity Id="LoadAllDependencies.e8577a42-880d-42ad-8883-92e632ef691d" Version="1.0.1" Language="en-US" Publisher="Jon Kale" />
-        <DisplayName>LoadAllDependencies</DisplayName>
+        <Identity Id="LoadAllDependencies.e8577a42-880d-42ad-8883-92e632ef691d" Version="1.0.2" Language="en-US" Publisher="Jon Kale" />
+        <DisplayName>Load All Dependencies</DisplayName>
         <Description xml:space="preserve">Loads all the dependencies of the selected project.</Description>
+        <License>LICENSE.txt</License>
         <Icon>Resources\Graph256.ico</Icon>
         <PreviewImage>Resources\Graph256.ico</PreviewImage>
     </Metadata>

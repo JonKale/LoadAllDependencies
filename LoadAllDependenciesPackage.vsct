@@ -31,6 +31,12 @@
     group; your package should define its own command set in order to avoid collisions
     with command ids defined by other packages. -->
 
+    <Groups>
+      <Group guid="guidLoadAllDependenciesPackageCmdSet" id="LoadAllDependenciesGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CTXT_PROJECT_UNLOADRELOAD"/>
+      </Group>
+    </Groups>
+
     <!--Buttons section. -->
     <!--This section defines the elements the user can interact with, like a menu command or a button
         or combo box in a toolbar. -->
@@ -42,7 +48,7 @@
               <CommandFlag>DefaultInvisible</CommandFlag>
               <CommandFlag>DynamicVisibility</CommandFlag>
           If you do not want an image next to your command, remove the Icon node /> -->
-      <Button guid="guidLoadAllDependenciesPackageCmdSet" id="LoadAllDependenciesId" priority="0x0102" type="Button">
+      <Button guid="guidLoadAllDependenciesPackageCmdSet" id="LoadAllDependenciesId" priority="0x0999" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_CTXT_PROJECT_UNLOADRELOAD" />
         <CommandFlag>DefaultInvisible</CommandFlag>
         <CommandFlag>DynamicVisibility</CommandFlag>
@@ -60,6 +66,7 @@
 
     <!-- This is the guid used to group the menu commands together -->
     <GuidSymbol name="guidLoadAllDependenciesPackageCmdSet" value="{a24ce2d6-6871-4350-9936-0fb86e1ffa7d}">
+      <IDSymbol name="LoadAllDependenciesGroup" value="0x1020" />
       <IDSymbol name="LoadAllDependenciesId" value="0x0100" />
     </GuidSymbol>
   </Symbols>

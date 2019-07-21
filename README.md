@@ -20,14 +20,14 @@ and Visual Studio loads *all* the projects needed for your selection to compile 
 
 ![Right-click Load All Project Dependencies](doc/solutionExplorer.png)
 
-Currently the only supported project types are `.csproj`, `.fsproj`, `.sqlproj`, `.vbproj` and `.vcxproj`; all these store references in `/Project/ItemGroup/ProjectReference` with the path to the project file in the `Include` attribute.
+Currently the only supported project types are `.csproj`, `.fsproj`, `.sqlproj`, `.vbproj` and `.vcxproj`; all these store references in `/Project/ItemGroup/ProjectReference` with the path to the project file in the `Include` attribute. If any other project types use the same strategy then it'll work for them too, otherwise send me a PR.
 
 If one or more project loads fail, the errors are written to the Output window.
 
 ![Project Dependencies Load Failures pane](doc/outputWindow.png)
 
 ## License
-[BSD two-clause](LICENSE)
+[BSD two-clause](LICENSE.txt)
 
 ## Changelog
 ### 1.0 - 21st July 2019
