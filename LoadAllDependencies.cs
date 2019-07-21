@@ -15,6 +15,7 @@ using ComServiceProvider = Microsoft.VisualStudio.OLE.Interop.IServiceProvider;
 using Task = System.Threading.Tasks.Task;
 using IAsyncServiceProvider = Microsoft.VisualStudio.Shell.IAsyncServiceProvider;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace LoadDependencies
 {
@@ -65,12 +66,6 @@ namespace LoadDependencies
         /// </summary>
         public static LoadAllDependencies Instance { get; private set; }
 
-        private SVsShellMonitorSelection MonitorSelection => 
-            Package.GetGlobalService( typeof( SVsShellMonitorSelection ) ) as SVsShellMonitorSelection;
-
-        private SVsSolution Solution =>
-            Package.GetGlobalService( typeof( SVsSolution ) ) as SVsSolution;
-
         /// <summary>
         /// Initializes the singleton instance of the command.
         /// </summary>
@@ -94,21 +89,22 @@ namespace LoadDependencies
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var (projectId, projectName) = this.GetSelectedProject();
+            var errorMessage = String.Empty;
+            var project = String.Empty;
+            var errors = new[] { new { project, errorMessage } }.ToList();
+
+            var (projectId, selectedProjectPath) = this.GetSelectedProject();
             if (projectId == Guid.Empty)
             {
                 return;
             }
 
-            var dependentProjectPaths = this.GetReferencedProjects( projectName );
+            var dependentProjectPaths = this.GetReferencedProjects( selectedProjectPath );
             var dependentProjects = dependentProjectPaths.Select( p => new { path = p, guid = this.GetProjectGuid( p ) } )
                                                          .Where( p => p.guid != Guid.Empty );
 
-            var solution = (IVsSolution4)this.Solution;
+            var solution = (IVsSolution4)Package.GetGlobalService( typeof( SVsSolution ) );
             Assumes.Present( solution );
-
-            var errorMessage = String.Empty;
-            var errors = new[] { new { projectName, errorMessage } }.ToList();
 
             // "If the project was not previously unloaded, then this method does nothing and returns S_FALSE." - MSDN
             // I'd love to know a better way of determining whether a project is loaded or not
@@ -125,12 +121,12 @@ namespace LoadDependencies
                     message += $"\r\n{ex.Message}";
                 }
 
-                errors.Add( new { projectName, errorMessage = message } );
+                errors.Add( new { project = selectedProjectPath, errorMessage = message } );
             }
 
-            foreach ( var project in dependentProjects )
+            foreach ( var dependentProject in dependentProjects )
             {
-                var guid = project.guid;
+                var guid = dependentProject.guid;
                 try
                 {
                     _ = ErrorHandler.ThrowOnFailure( solution.ReloadProject( ref guid ) );
@@ -144,13 +140,14 @@ namespace LoadDependencies
                         message += $"\r\n{ex.Message}";
                     }
 
-                    errors.Add( new { projectName = project.path, errorMessage = message } );
+                    errors.Add( new { project = dependentProject.path, errorMessage = message } );
                 }
             }
 
-            if ( errors.Count > 1 )
+            errors = errors.Skip( 1 ).ToList();
+            if ( errors.Count > 0 )
             {
-                var outputWindow = Package.GetGlobalService( typeof( SVsOutputWindow ) ) as IVsOutputWindow;
+                var outputWindow = (IVsOutputWindow)Package.GetGlobalService( typeof( SVsOutputWindow ) );
                 Assumes.Present( solution );
 
                 var guid = dependencyLoadFailuresPaneId;
@@ -161,12 +158,11 @@ namespace LoadDependencies
 
                 try
                 {
-                    foreach (var error in errors.Skip( 1 ))
+                    foreach ( var error in errors )
                     {
                         _ = ErrorHandler.ThrowOnFailure(
                             dependencyLoadFailurePane.OutputString(
-                                $"Failed to load {error.projectName}\r\n{error.errorMessage}\r\n" ) );
-
+                                $"Failed to load {error.project}\r\n{error.errorMessage}\r\n" ) );
                     }
 
                     _ = ErrorHandler.ThrowOnFailure( dependencyLoadFailurePane.Activate() );
@@ -176,9 +172,16 @@ namespace LoadDependencies
                     _ = Marshal.ReleaseComObject( dependencyLoadFailurePane );
                 }
 
+                var message = 
+                    errors[0].project == selectedProjectPath ? 
+                        errors.Count == 1 ? 
+                            "The selected project failed to load" :
+                            "This project and one of more of its dependencies failed to load" : 
+                        "One or more of this project's dependencies failed to load";
+
                 _ = VsShellUtilities.ShowMessageBox(
                     this.package,
-                    "One or more of this projects dependencies failed to load. See the Output window for details",
+                    $"{message}. See the Output window for details.",
                     "Error loading project or dependencies",
                     OLEMSGICON.OLEMSGICON_CRITICAL,
                     OLEMSGBUTTON.OLEMSGBUTTON_OK,
@@ -190,7 +193,7 @@ namespace LoadDependencies
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var monitorSelection = (IVsMonitorSelection) this.MonitorSelection;
+            var monitorSelection = (IVsMonitorSelection)Package.GetGlobalService( typeof( SVsShellMonitorSelection ) );
             Assumes.Present( monitorSelection );
 
             _ = ErrorHandler.ThrowOnFailure(
@@ -200,7 +203,7 @@ namespace LoadDependencies
             {
                 if (Marshal.GetTypedObjectForIUnknown( hierarchyPtr, typeof( IVsHierarchy ) ) is IVsHierarchy hierarchy)
                 {
-                    var solution = (IVsSolution)this.Solution;
+                    var solution = (IVsSolution)Package.GetGlobalService( typeof( SVsSolution ) );
                     Assumes.Present( solution );
 
                     _ = ErrorHandler.ThrowOnFailure( solution.GetSolutionInfo( out var directory, out _, out _ ) );
@@ -227,6 +230,10 @@ namespace LoadDependencies
         IEnumerable<string> GetReferencedProjects( string projectPath, HashSet<string> accumulator = null )
         {
             accumulator = accumulator ?? new HashSet<string>();
+
+            /// Note that this assumes that project files keep their references in /Project/ItemGroup/ProjectReference 
+            /// nodes. This function will need extending to handle other reference xpaths, but I've not seen any yet 
+            /// (currently works for .csproj, .vcxproj, .sqlproj, fsproj and .vbproj)
             var project = XDocument.Load( projectPath );
             var projectReferences = project.Root
                                            .Elements().Where( e => e.Name.LocalName == "ItemGroup" )
@@ -248,7 +255,7 @@ namespace LoadDependencies
         {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            var solution = (IVsSolution)this.Solution;
+            var solution = (IVsSolution)Package.GetGlobalService( typeof( SVsSolution ) );
             Assumes.Present( solution );
 
             _ = ErrorHandler.ThrowOnFailure( solution.GetProjectOfUniqueName( projectPath, out var hierarchy ) );
